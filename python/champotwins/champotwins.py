@@ -258,6 +258,8 @@ def draw_dist_stats(all_dists, labels=None, distnames=None, show_plots=True,
     fig.set_tight_layout(True)
 
     if out_plots_dir is not None:
+        if not osp.exists(out_plots_dir):
+            os.makedirs(out_plots_dir)
         fig.savefig(osp.join(out_plots_dir, 'distances.svg'))
     if show_plots:
         fig.show()
@@ -305,6 +307,33 @@ def draw_neighbours(nbcum, show_plots=True, out_plots_dir=None):
     ax.legend(nbcum.keys(), loc='upper left', bbox_to_anchor=[1.05, 1.])
     if out_plots_dir is not None:
         fig.savefig(osp.join(out_plots_dir, 'twin_found.svg'))
+    if show_plots:
+        fig.show()
+    else:
+        plt.close(fig)
+
+
+def draw_nregions(nbcum, show_plots=True, out_plots_dir=None):
+    if not show_plots and out_plots_dir is None:
+        return
+
+    import matplotlib.pyplot as plt
+
+    plt.rcParams['axes.prop_cycle'] = cycler.cycler('color', [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
+        '#e377c2', '#7f7f7f', '#bcbd22', '#17becf', '#0f19cf', '#a2cf95'])
+
+    fig = plt.figure()
+    ax = plt.axes()
+    box = ax.get_position()
+    ax.set_position([box.x0, box.y0, box.width * 0.7, box.height])
+    for dname, p in nbcum.items():
+        plt.plot(range(1, len(p) + 1), p, label=dname)
+    plt.xlabel('nb best regions')
+    plt.ylabel('% twin found')
+    ax.legend(nbcum.keys(), loc='upper left', bbox_to_anchor=[1.05, 1.])
+    if out_plots_dir is not None:
+        fig.savefig(osp.join(out_plots_dir, 'twin_found_nregions.svg'))
     if show_plots:
         fig.show()
     else:
@@ -443,9 +472,39 @@ def dist_separability(dist_mz, dist_dz, dist_nt, niter=300):
             (dz_dz_rate, dz_nt_rate))
 
 
+def twin_found_aggregative_regions(best_regions, region_embeddings,
+                                   participants, twins, dz_twins, nontwins,
+                                   summary, nmin=1, nmax=None):
+    if nmax is None:
+        nmax = len(best_regions)
+    best_n = {}
+    if nmin == 1:
+        for k, v in summary[best_regions[0][1]]['twin_found'].items():
+            best_n[k] = [v[0]]
+    for i in range(nmin, nmax):
+        regions = [x[1] for x in best_regions[:i + 1]]
+        best_emb = pd.concat([region_embeddings[r] for r in regions], axis=1)
+        missing = np.where(np.isnan(best_emb))
+        if len(missing[0]) != 0:
+            missing_s = np.unique(missing[0])
+            best_emb.drop(index=best_emb.index[missing_s], inplace=True)
+        out_sub_dir = osp.join(out_dir, f'best_{i}')
+        sub_res = do_all(participants, twins, dz_twins, nontwins,
+                         best_emb, out_dist_file=None,
+                         out_plots_dir=out_sub_dir, out_dir=None,
+                         show_plots=False, do_separability=False)
+        with open(osp.join(out_sub_dir, 'regions.json'), 'w') as f:
+            json.dump(regions, f)
+        for k, v in sub_res['twin_found'].items():
+            best_n[k].append(v[0])
+    with open(osp.join(out_dir, 'best_regions.json'), 'w') as f:
+        json.dump(best_n, f)
+    draw_nregions(best_n, show_plots=False, out_plots_dir=out_dir)
+
+
 def do_all(participants, twins, dz_twins, nontwins, embeddings,
            out_dist_file=None, show_plots=True, out_plots_dir=None,
-           out_dir=None):
+           out_dir=None, do_separability=True):
 
     embed_pca = pd.DataFrame(sklearn.decomposition.PCA(
         n_components=0.99, whiten=True,
@@ -479,36 +538,37 @@ def do_all(participants, twins, dz_twins, nontwins, embeddings,
                                'PCA99%/cos', 'PCA20/cos'),
                     show_plots=show_plots, out_plots_dir=out_plots_dir)
 
-    print('compute separability...')
-    separability = [dist_separability(all_dist[:, i], all_dz_dist[:, i],
-                                      all_nt_dist[:, i]) for i in range(6)]
-    avg_sep = [np.average(s) for s in separability]
-    best_dist_i = np.argmax(avg_sep)
+    if do_separability:
+        print('compute separability...')
+        separability = [dist_separability(all_dist[:, i], all_dz_dist[:, i],
+                                          all_nt_dist[:, i]) for i in range(6)]
+        avg_sep = [np.average(s) for s in separability]
+        best_dist_i = np.argmax(avg_sep)
 
-    best_dist = '-'.join([x for x in [dist_names[best_dist_i // 3],
-                                      embed_names[best_dist_i % 3]]
-                          if x != ''])
-    sorted_twins_best = all_sorted[:, best_dist_i]
-    twinsm = {k: i for i, k in enumerate(twins)}
-    dist_best = all_dist[:, best_dist_i]
-    sorted_dz_best = all_dz_sorted[:, best_dist_i]
-    dist_dz_best = all_dz_dist[:, best_dist_i]
-    dz_twinsm = {k: i for i, k in enumerate(dz_twins)}
+        best_dist = '-'.join([x for x in [dist_names[best_dist_i // 3],
+                                          embed_names[best_dist_i % 3]]
+                              if x != ''])
+        sorted_twins_best = all_sorted[:, best_dist_i]
+        twinsm = {k: i for i, k in enumerate(twins)}
+        dist_best = all_dist[:, best_dist_i]
+        sorted_dz_best = all_dz_sorted[:, best_dist_i]
+        dist_dz_best = all_dz_dist[:, best_dist_i]
+        dz_twinsm = {k: i for i, k in enumerate(dz_twins)}
 
-    if out_dist_file is not None:
-        with open(out_dist_file % best_dist, 'w') as f:
-            w = csv.writer(f, delimiter=',')
-            w.writerow(['ID1', 'ID2', 'MZ', 'dist', 'rank'])
-            for i, twin in enumerate(sorted_twins_best):
-                twin_i = twinsm[twin]
-                dist = dist_best[twin_i]
-                s1, s2 = twins[twin]
-                w.writerow([s1, s2, 'true', dist, i])
-            for i, twin in enumerate(sorted_dz_best):
-                twin_i = dz_twinsm[twin]
-                dist = dist_dz_best[twin_i]
-                s1, s2 = dz_twins[twin]
-                w.writerow([s1, s2, 'false', dist, i])
+        if out_dist_file is not None:
+            with open(out_dist_file % best_dist, 'w') as f:
+                w = csv.writer(f, delimiter=',')
+                w.writerow(['ID1', 'ID2', 'MZ', 'dist', 'rank'])
+                for i, twin in enumerate(sorted_twins_best):
+                    twin_i = twinsm[twin]
+                    dist = dist_best[twin_i]
+                    s1, s2 = twins[twin]
+                    w.writerow([s1, s2, 'true', dist, i])
+                for i, twin in enumerate(sorted_dz_best):
+                    twin_i = dz_twinsm[twin]
+                    dist = dist_dz_best[twin_i]
+                    s1, s2 = dz_twins[twin]
+                    w.writerow([s1, s2, 'false', dist, i])
 
     r, avg, std = rank_dispersion(ranks=all_sorted)
     draw_dispersion(avg, std, 'bo', show_plots, out_plots_dir)
@@ -556,9 +616,6 @@ def do_all(participants, twins, dz_twins, nontwins, embeddings,
             'dz': all_dz_sorted,
             'nt': all_nt_sorted,
         },
-        'separability': separability,
-        'best_dist': best_dist,
-        'best_dist_index': best_dist_i,
         'dispersion': {
             'r': r,
             'avg': avg,
@@ -566,6 +623,10 @@ def do_all(participants, twins, dz_twins, nontwins, embeddings,
         },
         'twin_found': nbcum,
     }
+    if do_separability:
+        res['separability'] = separability
+        res['best_dist'] = best_dist
+        res['best_dist_index'] = best_dist_i
     return res
 
 
@@ -619,23 +680,29 @@ def main():
                  show_plots=False)
 
     all_res = {'all': res}
+    region_embeddings = {}
 
     if sub_embeddings:
-        # sub_emb_fl = glob.glob(osp.join(embeddings_dir, sub_embeddings))
-        for region_s in regions_list['brain']:
+        if regions_list is None:
+            sub_emb_fl = glob.glob(osp.join(embeddings_dir, sub_embeddings))
+            regions_list = {
+                'brain': [osp.dirname(osp.dirname(f)) for f in sub_emb_fl]}
+
+        for i, region_s in enumerate(regions_list['brain']):
+            print(f'region {(i + 1) / len(regions_list["brain"])}: {region_s}')
             region = region_s.replace('.', '')
             sub_emb_fp = osp.join(embeddings_dir, region, sub_embeddings)
             sub_emb_f = glob.glob(sub_emb_fp)
             if len(sub_emb_f) == 0:
                 continue
             sub_emb_f = sub_emb_f[0]
-            # region = osp.relpath(sub_emb_f, embeddings_dir).split(osp.sep, 1)[0]
             out_sub_dir = osp.join(out_dir, region)
             if not osp.exists(out_sub_dir):
                 os.makedirs(out_sub_dir)
-            embeddings = read_embeddings(sub_emb_f)
+            embeddings_r = read_embeddings(sub_emb_f)
+            region_embeddings[region] = embeddings_r
             sub_res = do_all(participants, twins, dz_twins, nontwins,
-                             embeddings,
+                             embeddings_r,
                              out_dist_file=None, out_plots_dir=out_sub_dir,
                              out_dir=out_sub_dir, show_plots=False)
             all_res[region] = sub_res
@@ -694,7 +761,16 @@ def main():
     with open(out_res_f, 'w') as f:
         json.dump(summary, f, cls=NpEncoder)
 
-    display_stats(summary, out_plots_dir=out_sub_dir, show_plots=False)
+    display_stats(summary, out_plots_dir=out_dir, show_plots=False)
+
+    # concatenate best regions
+    best_regions = sorted([(np.max([y[0] for y in x['twin_found'].values()]),
+                            k)
+                           for k, x in summary.items() if k != 'all'],
+                          reverse=True)
+    twin_found_aggregative_regions(best_regions, region_embeddings,
+                                   participants, twins, dz_twins, nontwins,
+                                   summary, nmin=1, nmax=None)
 
 
 if __name__ == '__main__':
