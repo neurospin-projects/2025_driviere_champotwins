@@ -363,7 +363,7 @@ def display_stats(summary, show_plots=True, out_plots_dir=None):
     plt.bar(np.arange(len(regions)) - 0.2, twmz, width=0.4, tick_label=regions)
     plt.bar(np.arange(len(regions)) + 0.2, twdz, width=0.4)
     ax = fig.axes[0]
-    ax.tick_params(axis='x', labelrotation=80)
+    ax.tick_params(axis='x', labelrotation=90, labelsize=7)
     fig.legend(['MZ', 'DZ'])
     fig.tight_layout()
     if out_plots_dir is not None:
