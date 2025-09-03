@@ -17,6 +17,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 import glob
 import json
+import sys
+import argparse
+
 
 # paths for data and embeddings (valid at Neurospin on the intra network)
 
@@ -24,12 +27,14 @@ participants_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/par
 restricted_file = '/neurospin/dico/jchavas/RESTRICTED_jchavas_1_18_2022_3_17_51.csv'
 embeddings_dir = '/neurospin/dico/data/deep_folding/current/models/Champollion_V1_after_ablation'
 sub_embeddings = '*/hcp_random_embeddings/full_embeddings.csv'
-#embeddings_dir = '/neurospin/dico/jlaval/Runs_jl277509/yAwareContrastiveLearning/dataset/hcp_embeddings_nibabel.csv'
-out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_champollion_%s.csv'
-#out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_benoit_%s.csv'
 out_dir = '/neurospin/dico/driviere/hcp_twin_stats/champollion'
-#out_dir = '/neurospin/dico/driviere/hcp_twin_stats/benoit'
+out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_champollion_%s.csv'
 regions_list_f = '/neurospin/dico/data/deep_folding/current/sulci_regions_champollion_V1.json'
+
+# for Benoit Dufumier's y-aware model
+# embeddings_dir = '/neurospin/dico/jlaval/Runs_jl277509/yAwareContrastiveLearning/dataset/hcp_embeddings_nibabel.csv'
+# out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_benoit_%s.csv'
+# out_dir = '/neurospin/dico/driviere/hcp_twin_stats/benoit'
 
 
 def read_embeddings(embeddings_dir=embeddings_dir, regions_list=None):
@@ -130,7 +135,6 @@ def get_twins(participants, twin_types, df, monoz):
     done = set()
     num = 0
     for tt, tp, mono in zip(twin_types, df, monoz):
-        tdic = {}
         twins = {}
         tmeta = {}
 
@@ -274,7 +278,6 @@ def draw_dispersion(avg, std, style='bo', show_plots=True, out_plots_dir=None):
     import matplotlib.pyplot as plt
 
     fig = plt.figure()
-    ax = plt.axes()
     plt.plot(avg, std, style)
     plt.xlabel('average rank')
     plt.ylabel('rank std')
@@ -387,9 +390,9 @@ def display_stats(summary, show_plots=True, out_plots_dir=None):
     #model_r = a.loadObject(model_r_f)
 
 
-
 def build_all_twin_distances(twins, embeddings_list, distances):
-    nd = len(embeddings_list) * len(distances)
+    """ Build distances between twin subjects for the given distances
+    """
     all_dist = []
     sorted_twins = []
 
@@ -475,6 +478,9 @@ def dist_separability(dist_mz, dist_dz, dist_nt, niter=300):
 def twin_found_aggregative_regions(best_regions, region_embeddings,
                                    participants, twins, dz_twins, nontwins,
                                    summary, nmin=1, nmax=None):
+    """ Aggregare progressively "best" regions and record how twin
+        identification rates evolve with the number of regions.
+    """
     if nmax is None:
         nmax = len(best_regions)
     best_n = {}
@@ -647,6 +653,50 @@ class NpEncoder(json.JSONEncoder):
 def main():
     """ equivalent to calling the command champo_hcp_twin_distance.py
     """
+
+    global participants_file, restricted_file, embeddings_dir
+    global sub_embeddings, out_dist_file, out_dir, regions_list_f
+
+    parser = argparse.ArgumentParser(
+        'Compute distances between HCP twins based (mainly) on Champollion '
+        'latent space embeddings. Several distances are tested.')
+    parser.add_argument('-p', '--participants', default=participants_file,
+                        help='participants file (CSV) '
+                        f'(default: {participants_file}')
+    parser.add_argument('-r', '--restricted', default=restricted_file,
+                        help='participants restricted information file (CSV) '
+                        f'(default: {restricted_file}')
+    parser.add_argument('-e', '--embeddings', default=embeddings_dir,
+                        help='embeddings file (CSV) or directory '
+                        f'(default: {embeddings_dir}')
+    parser.add_argument('-s', '--sub_embeddings', default=sub_embeddings,
+                        help='embeddings .csv patter (sub-direcories and '
+                        'path) in the embeddings directory '
+                        f'(default: {sub_embeddings}')
+    parser.add_argument('-o', '--out_dir', default=out_dir,
+                        help='output directory where tables and plots will '
+                        'be written '
+                        f'(default: {out_dir}')
+    parser.add_argument('--out_dist', default=out_dist_file,
+                        help='output distances file (CSV) meant for '
+                        'twingame application '
+                        f'(default: {out_dist_file}')
+    parser.add_argument('--regions', default=regions_list_f,
+                        help='regions list file (JSON). If none, use every '
+                        'sub-directory in the embeddings dir as a possible '
+                        'region '
+                        f'(default: {regions_list_f}')
+
+    options = parser.parse_args(sys.argv[1:])
+
+    participants_file = options.participants
+    restricted_file = options.restricted
+    embeddings_dir = options.embeddings
+    sub_embeddings = options.sub_embeddings
+    out_dir = options.out_dir
+    out_dist_file = options.out_dist
+    regions_list_f = options.regions
+
     participants = pd.read_csv(participants_file, dtype={'Subject': str},
                                index_col='Subject')
     restricted = pd.read_csv(restricted_file,
