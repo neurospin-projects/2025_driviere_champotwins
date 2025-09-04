@@ -31,6 +31,10 @@ out_dir = '/neurospin/dico/driviere/hcp_twin_stats/champollion'
 out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_champollion_%s.csv'
 regions_list_f = '/neurospin/dico/data/deep_folding/current/sulci_regions_champollion_V1.json'
 
+quasiraw_dir = '/neurospin/psy/hcp/derivatives/quasi-raw'
+# quasiraw_dir = '/neurospin/dico/data/human/hcp/derivatives/morphologist-2023/hcp'
+mni_template_f = '/neurospin/dico/data/bv_databases/templates/morphologist_templates/icbm152/mni_icbm152_nlin_asym_09c/t1mri/default_acquisition/mni_icbm152_nlin_asym_09c.nii.gz'
+
 # for Benoit Dufumier's y-aware model
 # embeddings_dir = '/neurospin/dico/jlaval/Runs_jl277509/yAwareContrastiveLearning/dataset/hcp_embeddings_nibabel.csv'
 # out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_benoit_%s.csv'
@@ -184,8 +188,8 @@ def twin_dist(twins, embeddings, dist_func):
                     and twin_pair[1] in embeddings.index:
             emb1 = embeddings.loc[twin_pair[0]]
             emb2 = embeddings.loc[twin_pair[1]]
-            d = dist_func(emb1.to_numpy().reshape(1, -1),
-                          emb2.to_numpy().reshape(1, -1))[0]
+            d = dist_func(emb1.to_numpy().reshape(1, -1).astype(float),
+                          emb2.to_numpy().reshape(1, -1).astype(float))[0]
             dist[tname] = d
     return dist
 
@@ -508,6 +512,82 @@ def twin_found_aggregative_regions(best_regions, region_embeddings,
     draw_nregions(best_n, show_plots=False, out_plots_dir=out_dir)
 
 
+def get_quasiraw_image(quasiraw_dir, sub, resamp_dims, resamp_vs):
+    from soma import aims, aimsalgo
+
+    dsub = osp.join(quasiraw_dir, sub)
+    qrfile = osp.join(
+        dsub, f'ses-1/anat/{sub}_ses-1_preproc-linear_run-1_T1w.nii.gz')
+    vol = aims.read(qrfile).astype('S16')
+    sub_vol = aims.Volume(resamp_dims, dtype='S16')
+    sub_vol.setVoxelSize(resamp_vs)
+    # dtype = aims.typeCode(vol)[7:]
+    dtype = 'S16'
+    rs = getattr(aims, f'ResamplerFactory_{dtype}')
+    resamp = rs.getResampler(1)
+    resamp.resample(vol, aims.AffineTransformation3d(), 0, sub_vol)
+    return sub_vol
+
+
+def get_morphologist_quasiraw_image(quasiraw_dir, sub, resamp_dims, resamp_vs):
+    from soma import aims, aimsalgo
+
+    dsub = osp.join(quasiraw_dir, sub, 't1mri')
+    acq = [x for x in os.listdir(dsub) if osp.isdir(osp.join(dsub, x))][0]
+    nobias_file = f'{dsub}/{acq}/default_analysis/nobias_{sub}.nii.gz'
+    brain_file = f'{dsub}/{acq}/default_analysis/segmentation/brain_{sub}.nii.gz'
+    nobias = aims.read(nobias_file)
+    brain = aims.read(brain_file, border=1)
+    brain[brain.np != 0] = 32767
+    mg = aimsalgo.MorphoGreyLevel_S16()
+    cl_brain = mg.doClosing(brain, 3.)
+    nobias[cl_brain.np == 0] = 0
+    trans_file = f'{dsub}/{acq}/registration/RawT1-{sub}_{acq}_TO_Talairach-MNI.trm'
+    s_to_mni = aims.read(trans_file)
+    hdr = aims.StandardReferentials.icbm2009cTemplateHeader()
+    tpl_to_mni = aims.AffineTransformation3d(hdr['transformations'][0])
+    transl_half_vox = aims.AffineTransformation3d()
+    transl_half_vox.setTranslation((np.array(hdr['voxel_size'][:3])
+                                    - np.array(resamp_vs)) / 2)
+    trans = transl_half_vox * tpl_to_mni.inverse() * s_to_mni
+    resamp = aims.ResamplerFactory_S16.getResampler(1)
+    sub_vol = aims.Volume(resamp_dims, dtype='S16')
+    sub_vol.setVoxelSize(resamp_vs)
+    resamp.resample(nobias, trans, 0, sub_vol)
+    return sub_vol
+
+
+def embeddings_from_quasiraw(quasiraw_dir, quasiraw_method=get_quasiraw_image):
+    from soma import aims
+
+    # downsample ICBM template / 2
+    hdr = aims.StandardReferentials.icbm2009cTemplateHeader()
+    dims = hdr['volume_dimension'][:3]
+    resamp_dims = [x // 2 for x in dims]
+    vs = hdr['voxel_size'][:3]
+    resamp_vs = [x * 2 for x in vs]
+    print('resampled dims:', resamp_dims, resamp_vs)
+    subjects = []
+    for sub in os.listdir(quasiraw_dir):
+        dsub = osp.join(quasiraw_dir, sub)
+        if not osp.isdir(dsub):
+            continue
+        subjects.append(sub)
+    subjects = sorted(subjects)
+
+    embeddings_v = pd.DataFrame(np.zeros((len(subjects),
+                                          np.prod(resamp_dims))),
+                                index=[s[4:] for s in subjects],
+                                dtype=np.float32)
+    for i, sub in enumerate(subjects):
+        print(f'reading subject {i + 1} / {len(subjects)}...')
+        sub_vol = quasiraw_method(quasiraw_dir, sub, resamp_dims, resamp_vs)
+        isub = sub[4:]
+        embeddings_v.loc[isub] = sub_vol.np.ravel()
+
+    return embeddings_v
+
+
 def do_all(participants, twins, dz_twins, nontwins, embeddings,
            out_dist_file=None, show_plots=True, out_plots_dir=None,
            out_dir=None, do_separability=True):
@@ -662,30 +742,30 @@ def main():
         'latent space embeddings. Several distances are tested.')
     parser.add_argument('-p', '--participants', default=participants_file,
                         help='participants file (CSV) '
-                        f'(default: {participants_file}')
+                        f'(default: {participants_file})')
     parser.add_argument('-r', '--restricted', default=restricted_file,
                         help='participants restricted information file (CSV) '
-                        f'(default: {restricted_file}')
+                        f'(default: {restricted_file})')
     parser.add_argument('-e', '--embeddings', default=embeddings_dir,
                         help='embeddings file (CSV) or directory '
-                        f'(default: {embeddings_dir}')
+                        f'(default: {embeddings_dir})')
     parser.add_argument('-s', '--sub_embeddings', default=sub_embeddings,
                         help='embeddings .csv patter (sub-direcories and '
                         'path) in the embeddings directory '
-                        f'(default: {sub_embeddings}')
+                        f'(default: {sub_embeddings})')
     parser.add_argument('-o', '--out_dir', default=out_dir,
                         help='output directory where tables and plots will '
                         'be written '
-                        f'(default: {out_dir}')
+                        f'(default: {out_dir})')
     parser.add_argument('--out_dist', default=out_dist_file,
                         help='output distances file (CSV) meant for '
                         'twingame application '
-                        f'(default: {out_dist_file}')
+                        f'(default: {out_dist_file})')
     parser.add_argument('--regions', default=regions_list_f,
                         help='regions list file (JSON). If none, use every '
                         'sub-directory in the embeddings dir as a possible '
                         'region '
-                        f'(default: {regions_list_f}')
+                        f'(default: {regions_list_f})')
 
     options = parser.parse_args(sys.argv[1:])
 
