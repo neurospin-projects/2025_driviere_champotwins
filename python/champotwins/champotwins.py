@@ -583,7 +583,7 @@ def embeddings_from_quasiraw(quasiraw_dir, quasiraw_method=get_quasiraw_image):
     for i, sub in enumerate(subjects):
         print(f'reading subject {i + 1} / {len(subjects)}...')
         sub_vol = quasiraw_method(quasiraw_dir, sub, resamp_dims, resamp_vs)
-        isub = sub[4:]
+        isub = subnames[i]
         embeddings_v.loc[isub] = sub_vol.np.ravel()
 
     # check / debug images
