@@ -574,16 +574,26 @@ def embeddings_from_quasiraw(quasiraw_dir, quasiraw_method=get_quasiraw_image):
             continue
         subjects.append(sub)
     subjects = sorted(subjects)
+    subnames = [s[4:] if s.startswith('sub-') else s for s in subjects]
 
     embeddings_v = pd.DataFrame(np.zeros((len(subjects),
                                           np.prod(resamp_dims))),
-                                index=[s[4:] for s in subjects],
+                                index=subnames,
                                 dtype=np.float32)
     for i, sub in enumerate(subjects):
         print(f'reading subject {i + 1} / {len(subjects)}...')
         sub_vol = quasiraw_method(quasiraw_dir, sub, resamp_dims, resamp_vs)
         isub = sub[4:]
         embeddings_v.loc[isub] = sub_vol.np.ravel()
+
+    # check / debug images
+    debug = False
+    if debug:
+        img_tpl = '/tmp/test-sub-%(sub)s.nii.gz'
+        for i in range(0, len(embeddings_v.index),
+                       len(embeddings_v.index) // 10):
+            vol = aims.Volume(embeddings_v.iloc[i].reshape(resamp_dims))
+            aims.write(vol, img_tpl % {'sub': embeddings_v.index[i]})
 
     return embeddings_v
 
