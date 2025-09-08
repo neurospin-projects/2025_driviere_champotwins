@@ -557,6 +557,56 @@ def get_morphologist_quasiraw_image(quasiraw_dir, sub, resamp_dims, resamp_vs):
     return sub_vol
 
 
+def get_morpho_bmask_quasiraw_image(quasiraw_dir, sub, resamp_dims, resamp_vs):
+    from soma import aims, aimsalgo
+
+    dsub = osp.join(quasiraw_dir, sub, 't1mri')
+    acq = [x for x in os.listdir(dsub) if osp.isdir(osp.join(dsub, x))][0]
+    brain_file = f'{dsub}/{acq}/default_analysis/segmentation/brain_{sub}.nii.gz'
+    brain = aims.read(brain_file, border=1)
+    brain[brain.np != 0] = 1
+    trans_file = f'{dsub}/{acq}/registration/RawT1-{sub}_{acq}_TO_Talairach-MNI.trm'
+    s_to_mni = aims.read(trans_file)
+    hdr = aims.StandardReferentials.icbm2009cTemplateHeader()
+    tpl_to_mni = aims.AffineTransformation3d(hdr['transformations'][0])
+    transl_half_vox = aims.AffineTransformation3d()
+    transl_half_vox.setTranslation((np.array(hdr['voxel_size'][:3])
+                                    - np.array(resamp_vs)) / 2)
+    trans = transl_half_vox * tpl_to_mni.inverse() * s_to_mni
+    resamp = aims.ResamplerFactory_S16.getResampler(0)
+    sub_vol = aims.Volume(resamp_dims, dtype='S16')
+    sub_vol.setVoxelSize(resamp_vs)
+    resamp.resample(brain, trans, 0, sub_vol)
+    return sub_vol
+
+
+def get_morpho_closed_bmask_quasiraw_image(quasiraw_dir, sub, resamp_dims,
+                                           resamp_vs):
+    from soma import aims, aimsalgo
+
+    dsub = osp.join(quasiraw_dir, sub, 't1mri')
+    acq = [x for x in os.listdir(dsub) if osp.isdir(osp.join(dsub, x))][0]
+    brain_file = f'{dsub}/{acq}/default_analysis/segmentation/brain_{sub}.nii.gz'
+    brain = aims.read(brain_file, border=1)
+    brain[brain.np != 0] = 32767
+    mg = aimsalgo.MorphoGreyLevel_S16()
+    cl_brain = mg.doClosing(brain, 3.)
+    cl_brain[cl_brain.np != 0] = 1
+    trans_file = f'{dsub}/{acq}/registration/RawT1-{sub}_{acq}_TO_Talairach-MNI.trm'
+    s_to_mni = aims.read(trans_file)
+    hdr = aims.StandardReferentials.icbm2009cTemplateHeader()
+    tpl_to_mni = aims.AffineTransformation3d(hdr['transformations'][0])
+    transl_half_vox = aims.AffineTransformation3d()
+    transl_half_vox.setTranslation((np.array(hdr['voxel_size'][:3])
+                                    - np.array(resamp_vs)) / 2)
+    trans = transl_half_vox * tpl_to_mni.inverse() * s_to_mni
+    resamp = aims.ResamplerFactory_S16.getResampler(0)
+    sub_vol = aims.Volume(resamp_dims, dtype='S16')
+    sub_vol.setVoxelSize(resamp_vs)
+    resamp.resample(cl_brain, trans, 0, sub_vol)
+    return sub_vol
+
+
 def embeddings_from_quasiraw(quasiraw_dir, quasiraw_method=get_quasiraw_image):
     from soma import aims
 
