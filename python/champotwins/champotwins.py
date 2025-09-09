@@ -607,6 +607,38 @@ def get_morpho_closed_bmask_quasiraw_image(quasiraw_dir, sub, resamp_dims,
     return sub_vol
 
 
+def get_skel_quasiraw_image(quasiraw_dir, sub, resamp_dims, resamp_vs):
+    from soma import aims, aimsalgo
+
+    dsub = osp.join(quasiraw_dir, sub, 't1mri')
+    acq = [x for x in os.listdir(dsub) if osp.isdir(osp.join(dsub, x))][0]
+    graph_file = f'{dsub}/{acq}/default_analysis/folds/3.1/L{sub}.arg'
+    graph = aims.read(graph_file)
+
+    trans_file = f'{dsub}/{acq}/registration/RawT1-{sub}_{acq}_TO_Talairach-MNI.trm'
+    s_to_mni = aims.read(trans_file)
+    hdr = aims.StandardReferentials.icbm2009cTemplateHeader()
+    tpl_to_mni = aims.AffineTransformation3d(hdr['transformations'][0])
+    transl_half_vox = aims.AffineTransformation3d()
+    transl_half_vox.setTranslation((np.array(hdr['voxel_size'][:3])
+                                    - np.array(resamp_vs)) / 2)
+    trans = transl_half_vox * tpl_to_mni.inverse() * s_to_mni
+    sub_vol = aims.Volume(resamp_dims, dtype='S16')
+    sub_vol.setVoxelSize(resamp_vs)
+    sub_vol.fill(0)
+    itrans = trans.inverse()
+    bconv = aims.RawConverter_BucketMap_VOID_rc_ptr_Volume_S16()
+
+    for v in graph.vertices():
+        for bck_name in ('aims_ss', 'aims_bottom', 'aims_other'):
+            bck = v.get(bck_name)
+            if bck is not None:
+                tbck = aimsalgo.resampleBucket(bck, trans, itrans, resamp_vs)
+                bconv.printToVolume(tbck, sub_vol)
+
+    return sub_vol
+
+
 def embeddings_from_quasiraw(quasiraw_dir, quasiraw_method=get_quasiraw_image):
     from soma import aims
 
