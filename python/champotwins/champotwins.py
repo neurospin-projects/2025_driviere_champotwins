@@ -320,7 +320,7 @@ def draw_neighbours(nbcum, show_plots=True, out_plots_dir=None):
         plt.close(fig)
 
 
-def draw_nregions(nbcum, show_plots=True, out_plots_dir=None):
+def draw_nregions(nbcum, show_plots=True, out_plots_dir=None, dist=None):
     if not show_plots and out_plots_dir is None:
         return
 
@@ -334,13 +334,27 @@ def draw_nregions(nbcum, show_plots=True, out_plots_dir=None):
     ax = plt.axes()
     box = ax.get_position()
     ax.set_position([box.x0, box.y0, box.width * 0.7, box.height])
-    for dname, p in nbcum.items():
-        plt.plot(range(1, len(p) + 1), p, label=dname)
+    if dist is None:
+        # plot 1 best neigh for all distances
+        for dname, p in nbcum.items():
+            plt.plot(range(1, len(p) + 1), p[:, 0], label=dname)
+        out_plot_file = osp.join(out_plots_dir, 'twin_found_nregions.svg')
+        ax.legend(nbcum.keys(), loc='upper left', bbox_to_anchor=[1.05, 1.])
+    else:
+        # plot all neigh for single distance
+        data = np.array(nbcum[dist])
+        legends = []
+        for nn in range(data.shape[1]):
+            p = data[:, nn]
+            plt.plot(range(1, len(p) + 1), p, label=f'{nn} neigh.')
+            legends.append(f'{dist} {nn + 1} neigh')
+        out_plot_file = osp.join(out_plots_dir,
+                                 f'twin_found_{dist}_nregions.svg')
+        ax.legend(legends, loc='upper left', bbox_to_anchor=[1.05, 1.])
     plt.xlabel('nb best regions')
     plt.ylabel('% twin found')
-    ax.legend(nbcum.keys(), loc='upper left', bbox_to_anchor=[1.05, 1.])
     if out_plots_dir is not None:
-        fig.savefig(osp.join(out_plots_dir, 'twin_found_nregions.svg'))
+        fig.savefig(out_plot_file)
     if show_plots:
         fig.show()
     else:
@@ -481,16 +495,30 @@ def dist_separability(dist_mz, dist_dz, dist_nt, niter=300):
 
 def twin_found_aggregative_regions(best_regions, region_embeddings,
                                    participants, twins, dz_twins, nontwins,
-                                   summary, nmin=1, nmax=None):
-    """ Aggregare progressively "best" regions and record how twin
+                                   summary, nmin=1, nmax=None,
+                                   dist_names=None, embed_names=None,
+                                   category_names=['MZ', 'DZ']):
+    """ Aggregate progressively "best" regions and record how twin
         identification rates evolve with the number of regions.
     """
     if nmax is None:
         nmax = len(best_regions)
     best_n = {}
+    if dist_names is None:
+        dists = list(summary[best_regions[0][1]]['twin_found'].items())
+        dist_names = list(set([d.split('_')[0] for d in dists]))
+    if embed_names is None:
+        dists = list(summary[best_regions[0][1]]['twin_found'].items())
+        embed_names = list(set([d.split('_')[1]
+                                if len(d.split('_')) >= 3 else ''
+                                for d in dists]))
+
+    dists = ['_'.join([d, e, c] if e else [d, c])
+             for d in dist_names for e in embed_names for c in category_names]
     if nmin == 1:
-        for k, v in summary[best_regions[0][1]]['twin_found'].items():
-            best_n[k] = [v[0]]
+        best_n = {k: [np.array(summary[best_regions[0][1]]['twin_found'][k])]
+                  for k in dists}
+
     for i in range(nmin, nmax):
         regions = [x[1] for x in best_regions[:i + 1]]
         best_emb = pd.concat([region_embeddings[r] for r in regions], axis=1)
@@ -498,18 +526,29 @@ def twin_found_aggregative_regions(best_regions, region_embeddings,
         if len(missing[0]) != 0:
             missing_s = np.unique(missing[0])
             best_emb.drop(index=best_emb.index[missing_s], inplace=True)
-        out_sub_dir = osp.join(out_dir, f'best_{i}')
+        if len(dist_names) == 1 and len(embed_names) == 1:
+            dist = f'{dist_names[0]}'
+            if embed_names[0] != '':
+                dist += f'_{embed_names[0]}'
+            out_sub_dir = osp.join(out_dir, f'best_{dist}_{i}')
+        else:
+            out_sub_dir = osp.join(out_dir, f'best_{i}')
         sub_res = do_all(participants, twins, dz_twins, nontwins,
                          best_emb, out_dist_file=None,
-                         out_plots_dir=out_sub_dir, out_dir=None,
-                         show_plots=False, do_separability=False)
+                         out_plots_dir=None, out_dir=None,
+                         show_plots=False, do_separability=False,
+                         dist_names=dist_names, embed_names=embed_names)
+        if not osp.exists(out_sub_dir):
+            os.makedirs(out_sub_dir)
         with open(osp.join(out_sub_dir, 'regions.json'), 'w') as f:
             json.dump(regions, f)
         for k, v in sub_res['twin_found'].items():
-            best_n[k].append(v[0])
-    with open(osp.join(out_dir, 'best_regions.json'), 'w') as f:
-        json.dump(best_n, f)
-    draw_nregions(best_n, show_plots=False, out_plots_dir=out_dir)
+            if not k.endswith('_NT'):
+                best_n[k].append(v)
+    for dist in best_n:
+        draw_nregions(best_n, show_plots=False, out_plots_dir=out_dir,
+                      dist=dist)
+    return best_n
 
 
 def get_quasiraw_image(quasiraw_dir, sub, resamp_dims, resamp_vs):
@@ -682,38 +721,47 @@ def embeddings_from_quasiraw(quasiraw_dir, quasiraw_method=get_quasiraw_image):
 
 def do_all(participants, twins, dz_twins, nontwins, embeddings,
            out_dist_file=None, show_plots=True, out_plots_dir=None,
-           out_dir=None, do_separability=True):
+           out_dir=None, do_separability=True, dist_names=['eucl', 'cos'],
+           embed_names=['', 'PCA99%', 'PCA20']):
 
-    embed_pca = pd.DataFrame(sklearn.decomposition.PCA(
-        n_components=0.99, whiten=True,
-        svd_solver='full').fit_transform(embeddings),
-        index=embeddings.index)
-    embed_pca20 = pd.DataFrame(sklearn.decomposition.PCA(
-        n_components=20, whiten=True,
-        svd_solver='full').fit_transform(embeddings),
-        index=embeddings.index)
-    all_embeddings = [embeddings, embed_pca, embed_pca20]
-    distances = [euclidean_dist, cosine_dist]
+    distances = {'eucl': euclidean_dist,
+                 'cos': cosine_dist}
+    distances = {k: v for k, v in distances.items() if k in dist_names}
+    all_embeddings = {}
+    if '' in embed_names:
+        all_embeddings[''] = embeddings
+    if 'PCA99%' in embed_names or 'pca' in embed_names:
+        embed_pca = pd.DataFrame(sklearn.decomposition.PCA(
+            n_components=0.99, whiten=True,
+            svd_solver='full').fit_transform(embeddings),
+            index=embeddings.index)
+        all_embeddings['pca'] = embed_pca
+    if 'PCA20' in embed_names or 'pca20' in embed_names:
+        embed_pca20 = pd.DataFrame(sklearn.decomposition.PCA(
+            n_components=20, whiten=True,
+            svd_solver='full').fit_transform(embeddings),
+            index=embeddings.index)
+        all_embeddings['pca20'] = embed_pca20
 
-    embed_names = ['', 'PCA99%', 'PCA20']
-    dist_names = ['eucl', 'cos']
     category_names = ['MZ', 'DZ', 'NT']
+    cat_subjects = {'MZ': twins, 'DZ': dz_twins, 'NT': nontwins}
 
-    all_dist, all_sorted = build_all_twin_distances(twins, all_embeddings,
-                                                    distances)
+    all_dist, all_sorted = build_all_twin_distances(
+        twins, all_embeddings.values(), distances.values())
 
     # compare to DZ
     all_dz_dist, all_dz_sorted = build_all_twin_distances(
-        dz_twins, all_embeddings, distances)
+        dz_twins, all_embeddings.values(), distances.values())
 
     # compare to non-twins
     all_nt_dist, all_nt_sorted = build_all_twin_distances(
-        nontwins, all_embeddings, distances)
+        nontwins, all_embeddings.values(), distances.values())
 
+    distnames = ['/'.join([d, p] if p != '' else [d])
+                 for d in dist_names for p in embed_names]
     draw_dist_stats((all_dist, all_dz_dist, all_nt_dist),
                     labels=category_names,
-                    distnames=('eucl.', 'PCA99%/eucl.', 'PCA20/eucl.', 'cos',
-                               'PCA99%/cos', 'PCA20/cos'),
+                    distnames=distnames,
                     show_plots=show_plots, out_plots_dir=out_plots_dir)
 
     if do_separability:
@@ -751,20 +799,14 @@ def do_all(participants, twins, dz_twins, nontwins, embeddings,
     r, avg, std = rank_dispersion(ranks=all_sorted)
     draw_dispersion(avg, std, 'bo', show_plots, out_plots_dir)
 
-    dist_set = [
-        ('eucl_MZ', embeddings, twins, euclidean_dist),
-        ('eucl_pca_MZ', embed_pca, twins, euclidean_dist),
-        ('eucl_pca20_MZ', embed_pca20, twins, euclidean_dist),
-        ('cos_MZ', embeddings, twins, cosine_dist),
-        ('cos_pca_MZ', embed_pca, twins, cosine_dist),
-        ('cos_pca20_MZ', embed_pca20, twins, cosine_dist),
-        ('eucl_DZ', embeddings, dz_twins, euclidean_dist),
-        ('eucl_pca_DZ', embed_pca, dz_twins, euclidean_dist),
-        ('eucl_pca20_DZ', embed_pca20, dz_twins, euclidean_dist),
-        ('cos_DZ', embeddings, dz_twins, cosine_dist),
-        ('cos_pca_DZ', embed_pca, dz_twins, cosine_dist),
-        ('cos_pca20_DZ', embed_pca20, dz_twins, cosine_dist),
-    ]
+    dist_set = []
+    for dist in distances:
+        for embed in embed_names:
+            for cat in category_names:
+                dist_set.append(
+                    ('_'.join([x for x in [dist, embed, cat] if x]),
+                     all_embeddings[embed],
+                     cat_subjects[cat], distances[dist]))
 
     nbest = {}
     nearest = {}
@@ -986,14 +1028,35 @@ def main():
     display_stats(summary, out_plots_dir=out_dir, show_plots=False)
 
     # concatenate best regions
-    best_regions = sorted([(np.max([y[0] for y in x['twin_found'].values()]),
-                            k)
-                           for k, x in summary.items() if k != 'all'],
-                          reverse=True)
-    twin_found_aggregative_regions(best_regions, region_embeddings,
-                                   participants, twins, dz_twins, nontwins,
-                                   summary, nmin=1, nmax=None)
+    #best_regions = sorted([(np.max([y[0] for y in x['twin_found'].values()]),
+                            #k)
+                           #for k, x in summary.items() if k != 'all'],
+                          #reverse=True)
+    #best_n = twin_found_aggregative_regions(
+        #best_regions, region_embeddings, participants, twins, dz_twins,
+        #nontwins, summary, nmin=1, nmax=None)
+    # with open(osp.join(out_dir, 'best_regions.json'), 'w') as f:
+    #     json.dump(best_n, f)
 
+    best_regions_by_d = {
+        d: sorted(
+            [(x['twin_found'][d][0], k)
+             for k, x in summary.items() if k != 'all'],
+            reverse=True)
+        for d in summary['all']['twin_found']}
+    best_n = {}
+    for dist, breg in best_regions_by_d.items():
+        dist_name = dist.split('_')[0]
+        embed_name = dist.split('_')[1] if len(dist.split('_')) >= 3 else ''
+        bn = twin_found_aggregative_regions(
+            breg, region_embeddings, participants, twins, dz_twins, nontwins,
+            summary, nmin=1, nmax=None, dist_names=[dist_name],
+            embed_names=[embed_name])
+        best_n.update(bn)
+        if best_n['eucl_MZ'][0][0] < 0.08:
+            raise RuntimeError(f'invalid value entered the dict. dist: {dist}')
+    with open(osp.join(out_dir, 'best_regions.json'), 'w') as f:
+        json.dump(best_n, f, cls=NpEncoder)
 
 if __name__ == '__main__':
     main()
