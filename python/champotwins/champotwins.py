@@ -543,7 +543,7 @@ def twin_found_aggregative_regions(best_regions, region_embeddings,
         with open(osp.join(out_sub_dir, 'regions.json'), 'w') as f:
             json.dump(regions, f)
         for k, v in sub_res['twin_found'].items():
-            if not k.endswith('_NT'):
+            if k in dists:
                 best_n[k].append(v)
     for dist in best_n:
         draw_nregions(best_n, show_plots=False, out_plots_dir=out_dir,
@@ -1046,12 +1046,14 @@ def main():
         for d in summary['all']['twin_found']}
     best_n = {}
     for dist, breg in best_regions_by_d.items():
+        if not dist.endswith('_MZ'):
+            continue  # do only MZ
         dist_name = dist.split('_')[0]
         embed_name = dist.split('_')[1] if len(dist.split('_')) >= 3 else ''
         bn = twin_found_aggregative_regions(
             breg, region_embeddings, participants, twins, dz_twins, nontwins,
             summary, nmin=1, nmax=None, dist_names=[dist_name],
-            embed_names=[embed_name])
+            embed_names=[embed_name], category_names=['MZ'])
         best_n.update(bn)
         if best_n['eucl_MZ'][0][0] < 0.08:
             raise RuntimeError(f'invalid value entered the dict. dist: {dist}')
