@@ -593,6 +593,14 @@ def get_morphologist_quasiraw_image(quasiraw_dir, sub, resamp_dims, resamp_vs):
     sub_vol = aims.Volume(resamp_dims, dtype='S16')
     sub_vol.setVoxelSize(resamp_vs)
     resamp.resample(nobias, trans, 0, sub_vol)
+    # rescale values. Adjust to average of values of the 20% highest voxels
+    hist = aims.RegularBinnedHistogram_S16()
+    hist.doit(sub_vol)
+    ind = np.where(np.cumsum(hist.data().np) / np.prod(sub_vol.shape)
+                   >= 0.8)[0][0]
+    threshold = ind / hist.data().shape[0] * sub_vol.max()
+    avg = np.average(sub_vol[np.where(sub_vol.np >= threshold)])
+    sub_vol *= 1000. / avg
     return sub_vol
 
 
@@ -772,7 +780,7 @@ def all_sub_distances(embeddings, dist_func):
 def do_all(participants, twins, dz_twins, nontwins, embeddings,
            out_dist_file=None, show_plots=True, out_plots_dir=None,
            out_dir=None, do_separability=True, dist_names=['eucl', 'cos'],
-           embed_names=['', 'PCA99%', 'PCA20']):
+           embed_names=['', 'pca', 'pca20']):
 
     distances = {'eucl': euclidean_dist,
                  'cos': cosine_dist}
@@ -780,13 +788,13 @@ def do_all(participants, twins, dz_twins, nontwins, embeddings,
     all_embeddings = {}
     if '' in embed_names:
         all_embeddings[''] = embeddings
-    if 'PCA99%' in embed_names or 'pca' in embed_names:
+    if 'pca' in embed_names:
         embed_pca = pd.DataFrame(sklearn.decomposition.PCA(
             n_components=0.99, whiten=True,
             svd_solver='full').fit_transform(embeddings),
             index=embeddings.index)
         all_embeddings['pca'] = embed_pca
-    if 'PCA20' in embed_names or 'pca20' in embed_names:
+    if 'pca20' in embed_names:
         embed_pca20 = pd.DataFrame(sklearn.decomposition.PCA(
             n_components=20, whiten=True,
             svd_solver='full').fit_transform(embeddings),
