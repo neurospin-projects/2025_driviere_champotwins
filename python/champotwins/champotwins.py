@@ -674,6 +674,7 @@ def get_morpho_closed_bmask_vfilled_quasiraw_image(quasiraw_dir, sub,
         raise ValueError(
             'The cliosed mask does not have 1 connected component: '
             f'{len(np.unique(cl_brain2.np))}')
+    cl_brain2[cl_brain2.np != 0] = 32767
     ero_brain = mg.doErosion(cl_brain2, 5.)
     cl_brain[ero_brain.np != 0] = 1
     trans_file = f'{dsub}/{acq}/registration/RawT1-{sub}_{acq}_TO_Talairach-MNI.trm'
