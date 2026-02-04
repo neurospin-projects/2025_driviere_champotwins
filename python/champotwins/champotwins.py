@@ -656,9 +656,16 @@ def get_morpho_closed_bmask_vfilled_quasiraw_image(quasiraw_dir, sub,
     brain = aims.read(brain_file, border=1)
     brain[brain.np != 0] = 32767
     mg = aimsalgo.MorphoGreyLevel_S16()
-    cl_brain = mg.doClosing(brain, 3.)
+    cl_brain = mg.doClosing(brain, 5.)
     cl_brain[cl_brain.np != 0] = 1
-    cl_brain2 = mg.doClosing(brain, 8.)
+    cl_brain2 = mg.doClosing(brain, 12.)
+    # ensure 1 connectes component
+    aims.AimsConnectedComponent(cl_brain2,
+                                aims.Connectivity.CONNECTIVITY_26_XYZ)
+    if len(np.unique(cl_brain2.np)) != 2:
+        raise ValueError(
+            'The cliosed mask does not have 1 connected component: '
+            f'{len(np.unique(cl_brain2.np))}')
     ero_brain = mg.doErosion(cl_brain2, 5.)
     cl_brain[ero_brain.np != 0] = 1
     trans_file = f'{dsub}/{acq}/registration/RawT1-{sub}_{acq}_TO_Talairach-MNI.trm'
@@ -754,6 +761,7 @@ def all_sub_distances(embeddings, dist_func):
     nemb = embeddings.to_numpy().astype(float)
     for i in range(embeddings.shape[0]):
         emb1 = embeddings.iloc[i]
+        print(dist_func, embeddings.index[i])
         mat[i, :] = dist_func(emb1.to_numpy().reshape(1, -1).astype(float),
                               nemb)
     pmat = pd.DataFrame(mat, index=embeddings.index, columns=embeddings.index)
