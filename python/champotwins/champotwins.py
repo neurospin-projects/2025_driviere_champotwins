@@ -668,7 +668,7 @@ def get_morpho_closed_bmask_vfilled_quasiraw_image(quasiraw_dir, sub,
     cl_brain[cl_brain.np != 0] = 1
     cl_brain2 = mg.doClosing(brain, 12.)
     # ensure 1 connectes component
-    cc_mask = aims.Volume(cl_brain2)
+    cc_mask = aims.Volume(cl_brain2.get())
     cc_mask[cc_mask.np == 0] = 1
     cc_mask[cc_mask.np == 32767] = 0
     aims.AimsConnectedComponent(cc_mask,
