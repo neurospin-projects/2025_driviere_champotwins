@@ -668,12 +668,15 @@ def get_morpho_closed_bmask_vfilled_quasiraw_image(quasiraw_dir, sub,
     cl_brain[cl_brain.np != 0] = 1
     cl_brain2 = mg.doClosing(brain, 12.)
     # ensure 1 connectes component
-    aims.AimsConnectedComponent(cl_brain2,
+    cc_mask = aims.Volume(cl_brain2)
+    cc_mask[cc_mask.np == 0] = 1
+    cc_mask[cc_mask.np == 32767] = 0
+    aims.AimsConnectedComponent(cc_mask,
                                 aims.Connectivity.CONNECTIVITY_26_XYZ)
-    if len(np.unique(cl_brain2.np)) != 2:
+    if len(np.unique(cc_mask.np)) != 2:
         raise ValueError(
             'The cliosed mask does not have 1 connected component: '
-            f'{len(np.unique(cl_brain2.np))}')
+            f'{len(np.unique(cc_mask.np))}')
     cl_brain2[cl_brain2.np != 0] = 32767
     ero_brain = mg.doErosion(cl_brain2, 5.)
     cl_brain[ero_brain.np != 0] = 1
@@ -770,7 +773,7 @@ def all_sub_distances(embeddings, dist_func):
     nemb = embeddings.to_numpy().astype(float)
     for i in range(embeddings.shape[0]):
         emb1 = embeddings.iloc[i]
-        print(dist_func, embeddings.index[i])
+        print(i, dist_func, embeddings.index[i])
         mat[i, :] = dist_func(emb1.to_numpy().reshape(1, -1).astype(float),
                               nemb)
     pmat = pd.DataFrame(mat, index=embeddings.index, columns=embeddings.index)
