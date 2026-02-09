@@ -25,13 +25,13 @@ import argparse
 
 participants_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/participants.csv'
 restricted_file = '/neurospin/dico/jchavas/RESTRICTED_jchavas_1_18_2022_3_17_51.csv'
-embeddings_dir = '/neurospin/dico/data/deep_folding/current/models/Champollion_V1_after_ablation'
+# embeddings_dir = '/neurospin/dico/data/deep_folding/current/models/Champollion_V1_after_ablation'
 sub_embeddings = '*/hcp_random_embeddings/full_embeddings.csv'
-out_dir = '/neurospin/dico/driviere/hcp_twin_stats/champollion'
+out_dir_base = '/neurospin/dico/driviere/hcp_twin_stats'
 out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_champollion_%s.csv'
 regions_list_f = '/neurospin/dico/data/deep_folding/current/sulci_regions_champollion_V1.json'
 
-quasiraw_dir = '/neurospin/psy/hcp/derivatives/quasi-raw'
+# quasiraw_dir = '/neurospin/psy/hcp/derivatives/quasi-raw'
 # quasiraw_dir = '/neurospin/dico/data/human/hcp/derivatives/morphologist-2023/hcp'
 mni_template_f = '/neurospin/dico/data/bv_databases/templates/morphologist_templates/icbm152/mni_icbm152_nlin_asym_09c/t1mri/default_acquisition/mni_icbm152_nlin_asym_09c.nii.gz'
 
@@ -40,8 +40,38 @@ mni_template_f = '/neurospin/dico/data/bv_databases/templates/morphologist_templ
 # out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_benoit_%s.csv'
 # out_dir = '/neurospin/dico/driviere/hcp_twin_stats/benoit'
 
+embeddings_dirs = {
+    'champollion': '/neurospin/dico/data/deep_folding/current/models/Champollion_V1_after_ablation',
+    'benoit': '/neurospin/dico/jlaval/Runs_jl277509/yAwareContrastiveLearning/dataset/hcp_embeddings_nibabel.csv',
+    'quasiraw': '/neurospin/psy/hcp/derivatives/quasi-raw',
+    'morpho-quasiraw': '/neurospin/dico/data/human/hcp/derivatives/morphologist-2023/hcp',
+}
+for morpho_type in ('skel', 'brain', 'brain-closed', 'brain-vfilled',
+                    'voronoi'):
+    embeddings_dirs[morpho_type] = embeddings_dirs['morpho-quasiraw']
 
-def read_embeddings(embeddings_dir=embeddings_dir, regions_list=None):
+
+def read_embeddings(embeddings_dir, regions_list=None,
+                    embed_type='champollion'):
+    if embed_type == 'champollion':
+        return read_embeddings_csv(embeddings_dir, regions_list)
+    if embed_type == 'benoit':
+        return read_embeddings_csv(embeddings_dir)
+    image_types = {
+        'quasiraw': get_quasiraw_image,
+        'morpho-quasiraw': get_morphologist_quasiraw_image,
+        'skel': get_skel_quasiraw_image,
+        'brain': get_morpho_bmask_quasiraw_image,
+        'brain-closed': get_morpho_closed_bmask_quasiraw_image,
+        'brain-vfilled': get_morpho_closed_bmask_vfilled_quasiraw_image,
+        'voronoi': get_morpho_closed_hemi_vfilled_quasiraw_image,
+    }
+    if embed_type in image_types:
+        return embeddings_from_quasiraw(embeddings_dir,
+                                        image_types[embed_type])
+
+
+def read_embeddings_csv(embeddings_dir, regions_list=None):
     """ Read either a single embeddings file (.csv) or a series (a set of
     regions) from a directory, and possibly a regions list.
 
@@ -495,7 +525,7 @@ def dist_separability(dist_mz, dist_dz, dist_nt, niter=300):
 
 def twin_found_aggregative_regions(best_regions, region_embeddings,
                                    participants, twins, dz_twins, nontwins,
-                                   summary, nmin=1, nmax=None,
+                                   summary, out_dir, nmin=1, nmax=None,
                                    dist_names=None, embed_names=None,
                                    category_names=['MZ', 'DZ']):
     """ Aggregate progressively "best" regions and record how twin
@@ -656,27 +686,41 @@ def get_morpho_closed_bmask_quasiraw_image(quasiraw_dir, sub, resamp_dims,
 
 def get_morpho_closed_bmask_vfilled_quasiraw_image(quasiraw_dir, sub,
                                                    resamp_dims, resamp_vs):
+    return get_morpho_closed_bmask_vfilled_quasiraw_image_gen(
+        quasiraw_dir, sub, resamp_dims, resamp_vs, 'brain', [255])
+
+
+def get_morpho_closed_hemi_vfilled_quasiraw_image(quasiraw_dir, sub,
+                                                  resamp_dims, resamp_vs):
+    return get_morpho_closed_bmask_vfilled_quasiraw_image_gen(
+        quasiraw_dir, sub, resamp_dims, resamp_vs, 'voronoi', [1, 2])
+
+
+def get_morpho_closed_bmask_vfilled_quasiraw_image_gen(
+        quasiraw_dir, sub, resamp_dims, resamp_vs, brain_image, brain_values):
     from soma import aims, aimsalgo
 
     dsub = osp.join(quasiraw_dir, sub, 't1mri')
     acq = [x for x in os.listdir(dsub) if osp.isdir(osp.join(dsub, x))][0]
-    brain_file = f'{dsub}/{acq}/default_analysis/segmentation/brain_{sub}.nii.gz'
+    brain_file = f'{dsub}/{acq}/default_analysis/segmentation/{brain_image}_{sub}.nii.gz'
     brain = aims.read(brain_file, border=1)
-    brain[brain.np != 0] = 32767
+    for value in brain_values:
+        brain[brain.np == value] = 32767
+    brain[brain.np != 32767] = 0
     mg = aimsalgo.MorphoGreyLevel_S16()
     cl_brain = mg.doClosing(brain, 5.)
     cl_brain[cl_brain.np != 0] = 1
     cl_brain2 = mg.doClosing(brain, 12.)
-    # ensure 1 connectes component
-    cc_mask = aims.Volume(cl_brain2.get())
-    cc_mask[cc_mask.np == 0] = 1
-    cc_mask[cc_mask.np == 32767] = 0
-    aims.AimsConnectedComponent(cc_mask,
-                                aims.Connectivity.CONNECTIVITY_26_XYZ)
-    if len(np.unique(cc_mask.np)) != 2:
-        raise ValueError(
-            'The cliosed mask does not have 1 connected component: '
-            f'{len(np.unique(cc_mask.np))}')
+    # # check: ensure 1 connectes component
+    # cc_mask = aims.Volume(cl_brain2.get())
+    # cc_mask[cc_mask.np == 0] = 1
+    # cc_mask[cc_mask.np == 32767] = 0
+    # aims.AimsConnectedComponent(cc_mask,
+    #                             aims.Connectivity.CONNECTIVITY_26_XYZ)
+    # if len(np.unique(cc_mask.np)) != 2:
+    #     raise ValueError(
+    #         'The cliosed mask does not have 1 connected component: '
+    #         f'{len(np.unique(cc_mask.np))}')
     cl_brain2[cl_brain2.np != 0] = 32767
     ero_brain = mg.doErosion(cl_brain2, 5.)
     cl_brain[ero_brain.np != 0] = 1
@@ -940,7 +984,9 @@ def main():
     """
 
     global participants_file, restricted_file, embeddings_dir
-    global sub_embeddings, out_dist_file, out_dir, regions_list_f
+    global sub_embeddings, out_dist_file, out_dir_base, regions_list_f
+    out_dir = None
+    embeddings_dir = None
 
     parser = argparse.ArgumentParser(
         'Compute distances between HCP twins based (mainly) on Champollion '
@@ -951,17 +997,17 @@ def main():
     parser.add_argument('-r', '--restricted', default=restricted_file,
                         help='participants restricted information file (CSV) '
                         f'(default: {restricted_file})')
-    parser.add_argument('-e', '--embeddings', default=embeddings_dir,
+    parser.add_argument('-e', '--embeddings', default=None,
                         help='embeddings file (CSV) or directory '
-                        f'(default: {embeddings_dir})')
+                        '(default: depends on the embedding typen, see -t)')
     parser.add_argument('-s', '--sub_embeddings', default=sub_embeddings,
-                        help='embeddings .csv patter (sub-direcories and '
+                        help='embeddings .csv pattern (sub-direcories and '
                         'path) in the embeddings directory '
                         f'(default: {sub_embeddings})')
-    parser.add_argument('-o', '--out_dir', default=out_dir,
+    parser.add_argument('-o', '--out_dir', default=None,
                         help='output directory where tables and plots will '
                         'be written '
-                        f'(default: {out_dir})')
+                        f'(default: {out_dir_base}/<embedding-type>)')
     parser.add_argument('--out_dist', default=out_dist_file,
                         help='output distances file (CSV) meant for '
                         'twingame application '
@@ -971,6 +1017,13 @@ def main():
                         'sub-directory in the embeddings dir as a possible '
                         'region '
                         f'(default: {regions_list_f})')
+    parser.add_argument('-t', '--embedding-type', default='champollion',
+                        help='embedding type: champollion, benoit, quasiraw, '
+                        'morpho-quasiraw, skel, brain, brain-closed, '
+                        'brain-vfilled, voronoi')
+    parser.add_argument('-l', '--light', action='store_true',
+                        help='light processing: no separability nor '
+                        'aggregation study')
 
     options = parser.parse_args(sys.argv[1:])
 
@@ -981,6 +1034,11 @@ def main():
     out_dir = options.out_dir
     out_dist_file = options.out_dist
     regions_list_f = options.regions
+    light = options.light
+    embed_type = options.embedding_type
+
+    if out_dir is None:
+        out_dir = osp.join(out_dir_base, embed_type)
 
     participants = pd.read_csv(participants_file, dtype={'Subject': str},
                                index_col='Subject')
@@ -1004,15 +1062,23 @@ def main():
         with open(regions_list_f) as f:
             regions_list = json.load(f)
 
-    embeddings = read_embeddings(embeddings_dir, regions_list)
+    if embeddings_dir is None:
+        embeddings_dir = embeddings_dirs[embed_type]
+
+    embeddings = read_embeddings(embeddings_dir, regions_list, embed_type)
 
     nontwins = {'NT_%05d' % i: x
                 for i, x in enumerate(
                     random_non_twins_pairs(embeddings, all_twins, n=10000))}
 
+    do_separability = True
+    if light:
+        do_separability = False
+        sub_embeddings = None
+
     res = do_all(participants, twins, dz_twins, nontwins, embeddings,
                  out_dist_file=None, out_plots_dir=out_dir, out_dir=out_dir,
-                 show_plots=False)
+                 do_separability=do_separability, show_plots=False)
 
     all_res = {'all': res}
     region_embeddings = {}
@@ -1105,7 +1171,7 @@ def main():
                           #reverse=True)
     #best_n = twin_found_aggregative_regions(
         #best_regions, region_embeddings, participants, twins, dz_twins,
-        #nontwins, summary, nmin=1, nmax=None)
+        #nontwins, summary, out_dir, nmin=1, nmax=None)
     # with open(osp.join(out_dir, 'best_regions.json'), 'w') as f:
     #     json.dump(best_n, f)
 
@@ -1123,7 +1189,7 @@ def main():
         embed_name = dist.split('_')[1] if len(dist.split('_')) >= 3 else ''
         bn = twin_found_aggregative_regions(
             breg, region_embeddings, participants, twins, dz_twins, nontwins,
-            summary, nmin=1, nmax=None, dist_names=[dist_name],
+            summary, out_dir, nmin=1, nmax=None, dist_names=[dist_name],
             embed_names=[embed_name], category_names=['MZ'])
         best_n.update(bn)
         if best_n['eucl_MZ'][0][0] < 0.08:
