@@ -273,12 +273,25 @@ def find_nneighbour(embeddings, twins, dist_func, nneigh=1):
     return nneighbours
 
 
+def init_mpl(show_plots):
+    if not show_plots:
+        from soma.qt_gui import qt_backend
+        qt_backend.set_headless()
+    from soma.qt_gui.qt_backend import Qt
+    if Qt.QApplication.instance() is None:
+        global qt_app
+        qt_app = Qt.QApplication([])
+    import matplotlib.pyplot as plt
+
+    return plt
+
+
 def draw_dist_stats(all_dists, labels=None, distnames=None, show_plots=True,
                     out_plots_dir=None):
     if not show_plots and out_plots_dir is None:
         return
 
-    import matplotlib.pyplot as plt
+    plt = init_mpl(show_plots)
 
     npl = all_dists[0].shape[1]
     bdata = [[p[:, i] for p in all_dists] for i in range(npl)]
@@ -309,7 +322,7 @@ def draw_dispersion(avg, std, style='bo', show_plots=True, out_plots_dir=None):
     if not show_plots and out_plots_dir is None:
         return
 
-    import matplotlib.pyplot as plt
+    plt = init_mpl(show_plots)
 
     fig = plt.figure()
     plt.plot(avg, std, style)
@@ -327,7 +340,7 @@ def draw_neighbours(nbcum, show_plots=True, out_plots_dir=None):
     if not show_plots and out_plots_dir is None:
         return
 
-    import matplotlib.pyplot as plt
+    plt = init_mpl(show_plots)
 
     plt.rcParams['axes.prop_cycle'] = cycler.cycler('color', [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
@@ -354,7 +367,7 @@ def draw_nregions(nbcum, show_plots=True, out_plots_dir=None, dist=None):
     if not show_plots and out_plots_dir is None:
         return
 
-    import matplotlib.pyplot as plt
+    plt = init_mpl(show_plots)
 
     plt.rcParams['axes.prop_cycle'] = cycler.cycler('color', [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b',
@@ -395,7 +408,7 @@ def display_stats(summary, show_plots=True, out_plots_dir=None):
     if not show_plots and out_plots_dir is None:
         return
 
-    import matplotlib.pyplot as plt
+    plt = init_mpl(show_plots)
 
     regions = ['all'] + sorted(k for k in summary.keys() if k != 'all')
     #sep_byreg_best = [np.average(summary[r]['separability']
@@ -1039,6 +1052,8 @@ def main():
 
     if out_dir is None:
         out_dir = osp.join(out_dir_base, embed_type)
+
+    init_mpl(show_plots=False)
 
     participants = pd.read_csv(participants_file, dtype={'Subject': str},
                                index_col='Subject')
