@@ -26,6 +26,8 @@ import argparse
 participants_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/participants.csv'
 restricted_file = '/neurospin/dico/jchavas/RESTRICTED_jchavas_1_18_2022_3_17_51.csv'
 # embeddings_dir = '/neurospin/dico/data/deep_folding/current/models/Champollion_V1_after_ablation'
+# embeddings_dir = '/neurospin/dico/data/human/hcp/derivatives/champollion_V1'
+# embeddings_dir = '/neurospin/dico/data/human/UKBioBank/derivatives/champollion_V1'  # (UKB)
 sub_embeddings = '*/hcp_random_embeddings/full_embeddings.csv'
 out_dir_base = '/neurospin/dico/driviere/hcp_twin_stats'
 out_dist_file = '/neurospin/dico/data/bv_databases/human/not_labeled/hcp/tables/BL/twin_distances_champollion_%s.csv'
